@@ -20,6 +20,17 @@
             height: 100%;
             width: 100%;
         }
+
+        .popup-title {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .popup-type {
+            font-weight: bold;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 
@@ -38,7 +49,7 @@ L.tileLayer(
     }
 ).addTo(map);
 
-fetch('ActiveJobs.geojson')
+fetch('ActiveJobs.geojson?v=' + new Date().getTime())
 .then(response => response.json())
 .then(data => {
 
@@ -46,20 +57,20 @@ fetch('ActiveJobs.geojson')
 
         pointToLayer: function(feature, latlng) {
 
-            var status = feature.properties.Status || "";
+            var status = (feature.properties.Status || "").toLowerCase();
 
             var color = "blue";
 
-            if (status.toLowerCase() === "open") {
+            if (status === "open") {
                 color = "red";
             }
-            else if (status.toLowerCase() === "enroute") {
+            else if (status === "enroute") {
                 color = "orange";
             }
-            else if (status.toLowerCase() === "onscene") {
+            else if (status === "onscene") {
                 color = "green";
             }
-            else if (status.toLowerCase() === "clear") {
+            else if (status === "clear") {
                 color = "gray";
             }
 
@@ -78,17 +89,34 @@ fetch('ActiveJobs.geojson')
             var p = feature.properties;
 
             layer.bindPopup(
-                "<b>" + (p.IncidentNumber || "No Incident Number") + "</b><br><br>" +
-                "<b>" + (p.IncidentType || "") + "</b><br><br>" +
-                "Status: " + (p.Status || "") + "<br>" +
-                "Vehicle: " + (p.Vehicle || "") + "<br><br>" +
-                (p.Address || "")
+                '<div class="popup-title">' +
+                (p.IncidentNumber || "No Incident Number") +
+                '</div>' +
+
+                '<div class="popup-type">' +
+                (p.IncidentType || "") +
+                '</div>' +
+
+                '<b>Status:</b> ' + (p.Status || "") + '<br>' +
+                '<b>Vehicle:</b> ' + (p.Vehicle || "") + '<br><br>' +
+
+                '<b>Address:</b><br>' +
+                (p.Address || "") + '<br><br>' +
+
+                '<b>Opened:</b><br>' +
+                (p.IncidentTime || "") + '<br><br>' +
+
+                (p.ClearTime ?
+                    '<b>Cleared:</b><br>' + p.ClearTime
+                    : '')
             );
         }
 
     }).addTo(map);
 
-    map.fitBounds(geoLayer.getBounds());
+    if (geoLayer.getLayers().length > 0) {
+        map.fitBounds(geoLayer.getBounds());
+    }
 
 })
 .catch(error => {
