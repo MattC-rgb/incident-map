@@ -31,6 +31,13 @@
             margin-top: 5px;
             margin-bottom: 5px;
         }
+
+        .legend {
+            background: white;
+            padding: 10px;
+            border: 1px solid black;
+            line-height: 1.6;
+        }
     </style>
 </head>
 
@@ -53,7 +60,33 @@ fetch('ActiveJobs.geojson?v=' + new Date().getTime())
 .then(response => response.json())
 .then(data => {
 
-    var geoLayer = L.geoJSON(data, {
+    var filteredFeatures = data.features.filter(function(feature) {
+
+        var status = (feature.properties.Status || "").toLowerCase();
+
+        if (status !== "clear") {
+            return true;
+        }
+
+        if (!feature.properties.ClearTime) {
+            return false;
+        }
+
+        var clearTime = new Date(feature.properties.ClearTime);
+        var now = new Date();
+
+        var hoursOld =
+            (now - clearTime) / (1000 * 60 * 60);
+
+        return hoursOld <= 24;
+    });
+
+    var geoLayer = L.geoJSON(
+    {
+        type: "FeatureCollection",
+        features: filteredFeatures
+    },
+    {
 
         pointToLayer: function(feature, latlng) {
 
@@ -88,6 +121,22 @@ fetch('ActiveJobs.geojson?v=' + new Date().getTime())
 
             var p = feature.properties;
 
+            function formatDate(dateString) {
+
+                if (!dateString) return "";
+
+                return new Date(dateString).toLocaleString(
+                    'en-AU',
+                    {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }
+                );
+            }
+
             layer.bindPopup(
                 '<div class="popup-title">' +
                 (p.IncidentNumber || "No Incident Number") +
@@ -95,7 +144,7 @@ fetch('ActiveJobs.geojson?v=' + new Date().getTime())
 
                 '<div class="popup-type">' +
                 (p.IncidentType || "") +
-                '</div>' +
+                '</div><br>' +
 
                 '<b>Status:</b> ' + (p.Status || "") + '<br>' +
                 '<b>Vehicle:</b> ' + (p.Vehicle || "") + '<br><br>' +
@@ -104,10 +153,11 @@ fetch('ActiveJobs.geojson?v=' + new Date().getTime())
                 (p.Address || "") + '<br><br>' +
 
                 '<b>Opened:</b><br>' +
-                (p.IncidentTime || "") + '<br><br>' +
+                formatDate(p.IncidentTime) + '<br><br>' +
 
                 (p.ClearTime ?
-                    '<b>Cleared:</b><br>' + p.ClearTime
+                    '<b>Cleared:</b><br>' +
+                    formatDate(p.ClearTime)
                     : '')
             );
         }
@@ -117,6 +167,24 @@ fetch('ActiveJobs.geojson?v=' + new Date().getTime())
     if (geoLayer.getLayers().length > 0) {
         map.fitBounds(geoLayer.getBounds());
     }
+
+    var legend = L.control({position: 'bottomright'});
+
+    legend.onAdd = function() {
+
+        var div = L.DomUtil.create('div', 'legend');
+
+        div.innerHTML =
+            '<b>Status</b><br>' +
+            '🔴 Open<br>' +
+            '🟠 Enroute<br>' +
+            '🟢 Onscene<br>' +
+            '⚫ Clear (<24 hrs)';
+
+        return div;
+    };
+
+    legend.addTo(map);
 
 })
 .catch(error => {
