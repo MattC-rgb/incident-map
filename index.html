@@ -78,9 +78,11 @@ fetch('ActiveJobs.geojson')
             var p = feature.properties;
 
             layer.bindPopup(
-                "<b>" + (p.IncidentNumber || "No Incident Number") + "</b><br>" +
+                "<b>" + (p.IncidentNumber || "No Incident Number") + "</b><br><br>" +
+                "<b>" + (p.IncidentType || "") + "</b><br><br>" +
                 "Status: " + (p.Status || "") + "<br>" +
-                "Vehicle: " + (p.Vehicle || "")
+                "Vehicle: " + (p.Vehicle || "") + "<br><br>" +
+                (p.Address || "")
             );
         }
 
@@ -92,6 +94,10 @@ fetch('ActiveJobs.geojson')
 .catch(error => {
     console.error("Error loading GeoJSON:", error);
 });
+
+setTimeout(function() {
+    location.reload();
+}, 60000);
 
 </script>
 
