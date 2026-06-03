@@ -1,0 +1,16 @@
+[
+  {
+    "incident":"Test 1",
+    "status":"Open",
+    "lat":-37.4213067,
+    "lon":144.9757699,
+    "address":"Kilmore"
+  },
+  {
+    "incident":"Test 2",
+    "status":"OnScene",
+    "lat":-37.3437942,
+    "lon":144.7425994,
+    "address":"Wallan"
+  }
+]
