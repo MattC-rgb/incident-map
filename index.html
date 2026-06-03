@@ -62,23 +62,20 @@ fetch('ActiveJobs.geojson?v=' + new Date().getTime())
 
     var filteredFeatures = data.features.filter(function(feature) {
 
-        var status = (feature.properties.Status || "").toLowerCase();
+        var clearTime = feature.properties.ClearTime;
 
-        if (status !== "clear") {
+        if (!clearTime) {
             return true;
         }
 
-        if (!feature.properties.ClearTime) {
-            return false;
-        }
-
-        var clearTime = new Date(feature.properties.ClearTime);
+        var clearedDate = new Date(clearTime);
         var now = new Date();
 
         var hoursOld =
-            (now - clearTime) / (1000 * 60 * 60);
+            (now - clearedDate) / (1000 * 60 * 60);
 
         return hoursOld <= 24;
+
     });
 
     var geoLayer = L.geoJSON(
@@ -179,7 +176,7 @@ fetch('ActiveJobs.geojson?v=' + new Date().getTime())
             '🔴 Open<br>' +
             '🟠 Enroute<br>' +
             '🟢 Onscene<br>' +
-            '⚫ Clear (<24 hrs)';
+            '⚫ Clear (&lt;24 hrs)';
 
         return div;
     };
