@@ -1,4 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kilmore Incident Map</title>
+
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .popup-title {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .popup-type {
+            font-weight: bold;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+
+        .legend {
+            background: white;
+            padding: 10px;
+            border: 1px solid black;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
 <script>
+
+var map = L.map('map').setView([-37.5, 145.0], 8);
+
+L.tileLayer(
+    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {
+        attribution: '© OpenStreetMap'
+    }
+).addTo(map);
+
+fetch('ActiveJobs.geojson?v=' + new Date().getTime())
+.then(response => response.json())
+.then(data => {
+
+    var filteredFeatures = data.features.filter(function(feature) {
+
+        var clearTime = feature.properties.ClearTime;
+
+        if (!clearTime) {
+            return true;
+        }
+
+        var clearedDate = new Date(clearTime);
+        var now = new Date();
+
+        var hoursOld =
+            (now - clearedDate) / (1000 * 60 * 60);
+
+        return hoursOld <= 24;
+
+    });
+
+    var geoLayer = L.geoJSON(
+    {
+        type: "FeatureCollection",
+        features: filteredFeatures
+    },
+    {
+
+        pointToLayer: function(feature, latlng) {
+
+            var status = (feature.properties.Status || "").toLowerCase();
+
+            var color = "blue";
+
+            if (status === "open") {
+                color = "red";
+            }
+            else if (status === "enroute") {
+                color = "orange";
+            }
+            else if (status === "onscene") {
+                color = "green";
+            }
+            else if (status === "clear") {
+                color = "gray";
+            }
+
+            return L.circleMarker(latlng, {
+                radius: 8,
+                fillColor: color,
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+            });
+        },
+
+        onEachFeature: function(feature, layer) {
+
+            var p = feature.properties;
+
+            function formatDate(dateString) {
+
+                if (!dateString) return "";
+
+                return new Date(dateString).toLocaleString(
+                    'en-AU',
+                    {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }
+                );
+            }
+
+            layer.bindPopup(
+                '<div class="popup-title">' +
+                (p.IncidentNumber || "No Incident Number") +
+                '</div>' +
+
+                '<div class="popup-type">' +
+                (p.IncidentType || "") +
+                '</div><br>' +
+
+                '<b>Status:</b> ' + (p.Status || "") + '<br>' +
+                '<b>Vehicle:</b> ' + (p.Vehicle || "") + '<br><br>' +
+
+                '<b>Address:</b><br>' +
+                (p.Address || "") + '<br><br>' +
+
+                '<b>Opened:</b><br>' +
+                formatDate(p.IncidentTime) + '<br><br>' +
+
+                (p.ClearTime ?
+                    '<b>Cleared:</b><br>' +
+                    formatDate(p.ClearTime)
+                    : '')
+            );
+        }
+
+    }).addTo(map);
+
+    if (geoLayer.getLayers().length > 0) {
+        map.fitBounds(geoLayer.getBounds());
+    }
+
+    var legend = L.control({position: 'bottomright'});
+
+    legend.onAdd = function() {
+
+        var div = L.DomUtil.create('div', 'legend');
+
+        div.innerHTML =
+            '<b>Status</b><br>' +
+            '🔴 Open<br>' +
+            '🟠 Enroute<br>' +
+            '🟢 Onscene<br>' +
+            '⚫ Clear (&lt;24 hrs)';
+
+        return div;
+    };
+
+    legend.addTo(map);
+
+})
+.catch(error => {
+    console.error("Error loading GeoJSON:", error);
+});
+
+setTimeout(function() {
+    location.reload();
+}, 60000);
+
+</script>
+
+</body>
+</html><script>
 
 var map = L.map('map').setView([-37.5, 145.0], 8);
 
