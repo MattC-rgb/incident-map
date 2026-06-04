@@ -1,6 +1,17 @@
 <script>
 
-var map = L.map('map').setView([-37.5, 145.0], 8);
+var savedLat = localStorage.getItem("mapLat");
+var savedLng = localStorage.getItem("mapLng");
+var savedZoom = localStorage.getItem("mapZoom");
+
+var map = L.map('map').setView(
+    savedLat && savedLng
+        ? [parseFloat(savedLat), parseFloat(savedLng)]
+        : [-37.5, 145.0],
+    savedZoom
+        ? parseInt(savedZoom)
+        : 8
+);
 
 L.tileLayer(
     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -9,80 +20,38 @@ L.tileLayer(
     }
 ).addTo(map);
 
-var geoLayer = L.geoJSON().addTo(map);
+fetch('ActiveJobs.geojson?v=' + new Date().getTime())
+.then(response => response.json())
+.then(data => {
 
-var firstLoad = true;
+    var filteredFeatures = data.features.filter(function(feature) {
 
-var legend = L.control({position: 'bottomright'});
+        var clearTime = feature.properties.ClearTime;
 
-legend.onAdd = function() {
-
-    var div = L.DomUtil.create('div', 'legend');
-
-    div.innerHTML =
-        '<b>Status</b><br>' +
-        '🔴 Open<br>' +
-        '🟠 Enroute<br>' +
-        '🟢 Onscene<br>' +
-        '⚫ Clear (&lt;24 hrs)';
-
-    return div;
-};
-
-legend.addTo(map);
-
-function formatDate(dateString) {
-
-    if (!dateString) return "";
-
-    return new Date(dateString).toLocaleString(
-        'en-AU',
-        {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
+        if (!clearTime) {
+            return true;
         }
-    );
-}
 
-function refreshMap() {
+        var clearedDate = new Date(clearTime);
+        var now = new Date();
 
-    fetch('ActiveJobs.geojson?v=' + new Date().getTime())
-    .then(response => response.json())
-    .then(data => {
+        var hoursOld =
+            (now - clearedDate) / (1000 * 60 * 60);
 
-        var filteredFeatures = data.features.filter(function(feature) {
+        return hoursOld <= 24;
 
-            var clearTime = feature.properties.ClearTime;
+    });
 
-            if (!clearTime) {
-                return true;
-            }
+    var geoLayer = L.geoJSON(
+    {
+        type: "FeatureCollection",
+        features: filteredFeatures
+    },
+    {
 
-            var clearedDate = new Date(clearTime);
-            var now = new Date();
+        pointToLayer: function(feature, latlng) {
 
-            var hoursOld =
-                (now - clearedDate) / (1000 * 60 * 60);
-
-            return hoursOld <= 24;
-        });
-
-        geoLayer.clearLayers();
-
-        geoLayer.addData({
-            type: "FeatureCollection",
-            features: filteredFeatures
-        });
-
-        geoLayer.eachLayer(function(layer) {
-
-            var feature = layer.feature;
-            var p = feature.properties;
-
-            var status = (p.Status || "").toLowerCase();
+            var status = (feature.properties.Status || "").toLowerCase();
 
             var color = "blue";
 
@@ -99,15 +68,34 @@ function refreshMap() {
                 color = "gray";
             }
 
-            if (layer.setStyle) {
-                layer.setStyle({
-                    radius: 8,
-                    fillColor: color,
-                    color: "#000",
-                    weight: 1,
-                    opacity: 1,
-                    fillOpacity: 0.8
-                });
+            return L.circleMarker(latlng, {
+                radius: 8,
+                fillColor: color,
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+            });
+        },
+
+        onEachFeature: function(feature, layer) {
+
+            var p = feature.properties;
+
+            function formatDate(dateString) {
+
+                if (!dateString) return "";
+
+                return new Date(dateString).toLocaleString(
+                    'en-AU',
+                    {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }
+                );
             }
 
             layer.bindPopup(
@@ -128,28 +116,55 @@ function refreshMap() {
                 '<b>Opened:</b><br>' +
                 formatDate(p.IncidentTime) + '<br><br>' +
 
-                (p.ClearTime
-                    ? '<b>Cleared:</b><br>' +
-                      formatDate(p.ClearTime)
+                (p.ClearTime ?
+                    '<b>Cleared:</b><br>' +
+                    formatDate(p.ClearTime)
                     : '')
             );
-        });
-
-        if (firstLoad && geoLayer.getLayers().length > 0) {
-
-            map.fitBounds(geoLayer.getBounds());
-
-            firstLoad = false;
         }
 
-    })
-    .catch(error => {
-        console.error("Error loading GeoJSON:", error);
-    });
-}
+    }).addTo(map);
 
-refreshMap();
+    if (
+        geoLayer.getLayers().length > 0 &&
+        !localStorage.getItem("mapZoom")
+    ) {
+        map.fitBounds(geoLayer.getBounds());
+    }
 
-setInterval(refreshMap, 60000);
+    var legend = L.control({position: 'bottomright'});
+
+    legend.onAdd = function() {
+
+        var div = L.DomUtil.create('div', 'legend');
+
+        div.innerHTML =
+            '<b>Status</b><br>' +
+            '🔴 Open<br>' +
+            '🟠 Enroute<br>' +
+            '🟢 Onscene<br>' +
+            '⚫ Clear (&lt;24 hrs)';
+
+        return div;
+    };
+
+    legend.addTo(map);
+
+})
+.catch(error => {
+    console.error("Error loading GeoJSON:", error);
+});
+
+setTimeout(function() {
+
+    var center = map.getCenter();
+
+    localStorage.setItem("mapLat", center.lat);
+    localStorage.setItem("mapLng", center.lng);
+    localStorage.setItem("mapZoom", map.getZoom());
+
+    location.reload();
+
+}, 60000);
 
 </script>
