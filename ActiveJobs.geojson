@@ -1,1 +1,1 @@
-{"type":"FeatureCollection","features":[]}
+{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[145.3856755,-37.8862117]},"properties":{"IncidentNumber":"","Status":"Open","Vehicle":"Kilmore Support 1","IncidentType":"@@ALERT RE: S260651001 - CREW REQUIRED THANKS [EMER]","Address":"CREW REQUIRED THANKS [EMER]","IncidentTime":"2026-06-06T04:08:12Z","EnRouteTime":"","OnSceneTime":"","ClearTime":""}}]}
