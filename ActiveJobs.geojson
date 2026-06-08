@@ -1,1 +1,1 @@
-{"type":"FeatureCollection","features":[]}
+{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[145.2233301,-37.9372597]},"properties":{"IncidentNumber":"S260651118","Status":"Open","Vehicle":"","IncidentType":"HbS260651118 KNOX","Address":"88 SEEBECK RD ROWVILLE /ILLAWARRA AV //GEORGE KNOX DR","IncidentTime":"2026-06-08T00:58:21Z","EnRouteTime":"","OnSceneTime":"","ClearTime":""}}]}
