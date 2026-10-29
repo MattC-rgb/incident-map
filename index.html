@@ -1,15 +1,22 @@
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Kilmore Incident Map</title>
 
-    <link rel="stylesheet"
-          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <title>Live Incident Map</title>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Ask the browser not to cache this page -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
+    <!-- Leaflet map library -->
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    >
 
     <style>
         html, body {
@@ -17,6 +24,7 @@
             width: 100%;
             margin: 0;
             padding: 0;
+            font-family: Arial, sans-serif;
         }
 
         #map {
@@ -24,257 +32,272 @@
             width: 100%;
         }
 
-        .popup-title {
-            font-weight: bold;
-            font-size: 16px;
-        }
-
-        .popup-type {
-            font-weight: bold;
-            margin-top: 5px;
-            margin-bottom: 5px;
-        }
-
-        .legend {
-            background: white;
-            padding: 10px;
-            border: 1px solid black;
-            line-height: 1.6;
-        }
-
-        .feed-status {
+        #status {
             position: absolute;
             top: 10px;
             left: 50px;
             z-index: 1000;
             background: white;
-            padding: 8px 12px;
-            border-radius: 4px;
-            box-shadow: 0 1px 5px #999;
-            font: 13px Arial, sans-serif;
+            padding: 10px 14px;
+            border-radius: 6px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.35);
+            font-size: 14px;
+            line-height: 1.5;
+            max-width: calc(100vw - 100px);
+        }
+
+        .incident-marker {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #d71920;
+            border: 2px solid white;
+            box-shadow: 0 0 4px rgba(0,0,0,0.65);
+        }
+
+        .popup-title {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 6px;
+        }
+
+        .popup-row {
+            margin: 3px 0;
         }
     </style>
 </head>
 
 <body>
+    <div id="status">
+        <strong>Live Incident Map</strong><br>
+        Connecting to Matrix…
+    </div>
 
-<div id="map"></div>
-<div id="feedStatus" class="feed-status">Connecting to live feed…</div>
+    <div id="map"></div>
 
-<script>
-"use strict";
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-// Live Matrix feed via Cloudflare Worker
-const WORKER_URL =
-    "https://matrix-live-jobs.matt-cullen.workers.dev/api/jobs";
+    <script>
+    (() => {
+        // Matrix feed through your Cloudflare Worker
+        const WORKER_URL =
+            "https://matrix-live-jobs.matt-cullen.workers.dev/api/jobs";
 
-const params = new URLSearchParams(window.location.search);
-const agencyFilter = (params.get("agency") || "").toLowerCase();
+        // Read the selected agency from the URL
+        const params = new URLSearchParams(window.location.search);
+        const agency = (params.get("agency") || "").toLowerCase();
 
-const map = L.map("map").setView([-37.5, 145.0], 8);
+        const agencyNames = {
+            av: "AV",
+            fire: "Fire",
+            ses: "SES"
+        };
 
-L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-        attribution: "&copy; OpenStreetMap contributors"
-    }
-).addTo(map);
+        const agencyName = agencyNames[agency] || "All agencies";
 
-let firstLoad = true;
-let requestInProgress = false;
+        const statusBox = document.getElementById("status");
 
-const statusElement = document.getElementById("feedStatus");
+        // Initialise the map
+        const map = L.map("map").setView([-36.8, 144.5], 7);
 
-function escapeHtml(value) {
-    return String(value ?? "").replace(/[&<>"']/g, function(char) {
-        return {
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;"
-        }[char];
-    });
-}
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap contributors"
+        }).addTo(map);
 
-function formatDate(value) {
-    if (value === null || value === undefined || value === "") {
-        return "";
-    }
+        const incidentLayer = L.layerGroup().addTo(map);
 
-    // Matrix timestamps are Unix seconds, not milliseconds.
-    const numberValue = Number(value);
-    const date = Number.isFinite(numberValue)
-        ? new Date(numberValue * 1000)
-        : new Date(value);
+        let firstLoad = true;
+        let isLoading = false;
 
-    if (Number.isNaN(date.getTime())) {
-        return "";
-    }
-
-    return date.toLocaleString("en-AU", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-    });
-}
-
-function getStatus(job) {
-    if (job.is_active === true) return "open";
-    return "clear";
-}
-
-function getColour(status) {
-    if (status === "open") return "red";
-    if (status === "enroute") return "orange";
-    if (status === "onscene") return "green";
-    return "gray";
-}
-
-function getAgencyLabel(agency) {
-    return {
-        av: "AV",
-        fire: "Fire",
-        ses: "SES"
-    }[agency] || "All agencies";
-}
-
-const markerLayer = L.layerGroup().addTo(map);
-
-function buildPopup(job) {
-    const status = getStatus(job);
-
-    return `
-        <div class="popup-title">${escapeHtml(job.id || "No Incident ID")}</div>
-        <div class="popup-type">${escapeHtml(job.type || "")}</div>
-        <br>
-        <b>Agency:</b> ${escapeHtml(job.agency || "")}<br>
-        <b>Area:</b> ${escapeHtml(job.area || "")}<br>
-        <b>Status:</b> ${escapeHtml(status)}<br>
-        <b>Incident:</b> ${escapeHtml(job.name || "")}<br>
-        <b>Address:</b><br>${escapeHtml(job.address || "")}<br>
-        <b>Suburb:</b> ${escapeHtml(job.suburb || "")}<br><br>
-        <b>Last seen:</b> ${escapeHtml(formatDate(job.last_seen))}<br>
-        <b>Source updated:</b> ${escapeHtml(formatDate(job.source_updated))}
-    `;
-}
-
-function matchesAgency(job) {
-    if (!agencyFilter) return true;
-
-    if (agencyFilter === "av") {
-        // Match the same ID prefixes used in the Power Apps gallery.
-        return ["J", "E", "Z"].some(prefix =>
-            String(job.id || "").startsWith(prefix)
-        );
-    }
-
-    if (agencyFilter === "fire") {
-        return String(job.id || "").startsWith("F");
-    }
-
-    if (agencyFilter === "ses") {
-        return String(job.id || "").startsWith("S");
-    }
-
-    // Unknown URL filters should not silently hide all jobs.
-    return true;
-}
-
-async function refreshMap() {
-    if (requestInProgress) return;
-
-    requestInProgress = true;
-
-    try {
-        const response = await fetch(WORKER_URL, {
-            method: "GET",
-            cache: "no-store"
-        });
-
-        if (!response.ok) {
-            throw new Error("Feed returned HTTP " + response.status);
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
         }
 
-        const jobs = await response.json();
-
-        if (!Array.isArray(jobs)) {
-            throw new Error("Feed did not return a JSON array");
-        }
-
-        const filteredJobs = jobs.filter(job =>
-            matchesAgency(job) &&
-            job.is_active === true &&
-            Number.isFinite(Number(job.lat)) &&
-            Number.isFinite(Number(job.lon)) &&
-            Number(job.lat) >= -90 &&
-            Number(job.lat) <= 90 &&
-            Number(job.lon) >= -180 &&
-            Number(job.lon) <= 180
-        );
-
-        markerLayer.clearLayers();
-
-        filteredJobs.forEach(job => {
-            const status = getStatus(job);
-            const marker = L.circleMarker(
-                [Number(job.lat), Number(job.lon)],
-                {
-                    radius: 8,
-                    fillColor: getColour(status),
-                    color: "#000",
-                    weight: 1,
-                    opacity: 1,
-                    fillOpacity: 0.8
-                }
-            );
-
-            marker.bindPopup(buildPopup(job));
-            marker.addTo(markerLayer);
-        });
-
-        statusElement.textContent =
-            `${getAgencyLabel(agencyFilter)} · ${filteredJobs.length} active jobs · Updated ${new Date().toLocaleTimeString("en-AU")}`;
-
-        if (firstLoad && filteredJobs.length > 0) {
-            const bounds = markerLayer.getBounds();
-
-            if (bounds.isValid()) {
-                map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+        function formatTime(value) {
+            if (value === null || value === undefined || value === "") {
+                return "Unknown";
             }
 
-            firstLoad = false;
+            const number = Number(value);
+
+            // Matrix timestamps are Unix seconds
+            const date = new Date(
+                number < 100000000000 ? number * 1000 : number
+            );
+
+            if (Number.isNaN(date.getTime())) {
+                return "Unknown";
+            }
+
+            return date.toLocaleString("en-AU", {
+                dateStyle: "short",
+                timeStyle: "medium"
+            });
         }
-    } catch (error) {
-        console.error("Error loading Matrix feed:", error);
-        statusElement.textContent =
-            "Feed error — check connection or Worker settings";
-    } finally {
-        requestInProgress = false;
-    }
-}
 
-const legend = L.control({ position: "bottomright" });
+        function makePopup(job) {
+            return `
+                <div class="popup-title">
+                    ${escapeHtml(job.id || "Unknown incident")}
+                </div>
+                <div class="popup-row">
+                    <strong>Type:</strong>
+                    ${escapeHtml(job.type || job.typecode || "Unknown")}
+                </div>
+                <div class="popup-row">
+                    <strong>Agency:</strong>
+                    ${escapeHtml(job.agency || "Unknown")}
+                </div>
+                <div class="popup-row">
+                    <strong>Area:</strong>
+                    ${escapeHtml(job.area || "Unknown")}
+                </div>
+                <div class="popup-row">
+                    <strong>Name:</strong>
+                    ${escapeHtml(job.name || job.shortname || "Unknown")}
+                </div>
+                <div class="popup-row">
+                    <strong>Address:</strong>
+                    ${escapeHtml(job.address || "Unknown")}
+                </div>
+                <div class="popup-row">
+                    <strong>Suburb:</strong>
+                    ${escapeHtml(job.suburb || "Unknown")}
+                </div>
+                <div class="popup-row">
+                    <strong>Last seen:</strong>
+                    ${escapeHtml(formatTime(job.last_seen))}
+                </div>
+                <div class="popup-row">
+                    <strong>Source updated:</strong>
+                    ${escapeHtml(formatTime(job.source_updated))}
+                </div>
+            `;
+        }
 
-legend.onAdd = function() {
-    const div = L.DomUtil.create("div", "legend");
+        function matchesAgency(job) {
+            const id = String(job.id || "").toUpperCase();
 
-    div.innerHTML =
-        "<b>Incident status</b><br>" +
-        "🔴 Active job<br>" +
-        "<br><b>Agency filter</b><br>" +
-        escapeHtml(getAgencyLabel(agencyFilter));
+            if (agency === "av") {
+                return ["J", "E", "Z"].some(prefix => id.startsWith(prefix));
+            }
 
-    return div;
-};
+            if (agency === "fire") {
+                return id.startsWith("F");
+            }
 
-legend.addTo(map);
+            if (agency === "ses") {
+                return id.startsWith("S");
+            }
 
-refreshMap();
-setInterval(refreshMap, 10000);
-</script>
+            return true;
+        }
 
+        async function loadJobs() {
+            if (isLoading) return;
+            isLoading = true;
+
+            try {
+                // Unique URL and no-store prevent reuse of a cached jobs response
+                const separator = WORKER_URL.includes("?") ? "&" : "?";
+                const requestUrl =
+                    WORKER_URL +
+                    separator +
+                    "agency=" + encodeURIComponent(agency) +
+                    "&_=" + Date.now();
+
+                const response = await fetch(requestUrl, {
+                    method: "GET",
+                    cache: "no-store"
+                });
+
+                if (!response.ok) {
+                    throw new Error("Worker returned HTTP " + response.status);
+                }
+
+                const data = await response.json();
+
+                if (!Array.isArray(data)) {
+                    throw new Error("The Matrix response was not a JSON array");
+                }
+
+                // Keep active incidents with valid map coordinates
+                const jobs = data.filter(job => {
+                    const lat = Number(job.lat);
+                    const lon = Number(job.lon);
+
+                    return job.is_active === true &&
+                        matchesAgency(job) &&
+                        Number.isFinite(lat) &&
+                        Number.isFinite(lon) &&
+                        Math.abs(lat) <= 90 &&
+                        Math.abs(lon) <= 180;
+                });
+
+                incidentLayer.clearLayers();
+
+                jobs.forEach(job => {
+                    const marker = L.marker(
+                        [Number(job.lat), Number(job.lon)],
+                        {
+                            icon: L.divIcon({
+                                className: "",
+                                html: '<div class="incident-marker"></div>',
+                                iconSize: [18, 18],
+                                iconAnchor: [9, 9]
+                            })
+                        }
+                    );
+
+                    marker.bindPopup(makePopup(job));
+                    marker.addTo(incidentLayer);
+                });
+
+                const updated = new Date().toLocaleTimeString("en-AU");
+
+                statusBox.innerHTML =
+                    "<strong>Live Incident Map</strong><br>" +
+                    "Agency: " + escapeHtml(agencyName) + "<br>" +
+                    "Active jobs: " + jobs.length + "<br>" +
+                    "Last refreshed: " + escapeHtml(updated);
+
+                if (firstLoad && jobs.length > 0) {
+                    const bounds = incidentLayer.getBounds();
+
+                    if (bounds.isValid()) {
+                        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+                    }
+
+                    firstLoad = false;
+                }
+
+                if (jobs.length === 0) {
+                    firstLoad = false;
+                }
+
+            } catch (error) {
+                console.error("Failed to load Matrix jobs:", error);
+
+                statusBox.innerHTML =
+                    "<strong>Live Incident Map</strong><br>" +
+                    "Agency: " + escapeHtml(agencyName) + "<br>" +
+                    "Unable to refresh jobs.<br>" +
+                    "Check connection or Worker configuration.";
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        // Initial load, then refresh every 10 seconds
+        loadJobs();
+        setInterval(loadJobs, 10000);
+    })();
+    </script>
 </body>
 </html>
