@@ -38,6 +38,7 @@
             font-size: 14px;
             line-height: 1.5;
             max-width: calc(100vw - 100px);
+            overflow-wrap: anywhere;
         }
 
         .incident-marker {
@@ -265,11 +266,9 @@
             isLoading = true;
 
             try {
-                const separator = WORKER_URL.includes("?") ? "&" : "?";
                 const requestUrl =
                     WORKER_URL +
-                    separator +
-                    "agency=" + encodeURIComponent(agency) +
+                    "?agency=" + encodeURIComponent(agency) +
                     "&_=" + Date.now();
 
                 const response = await fetch(requestUrl, {
@@ -278,13 +277,15 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error("Worker returned HTTP " + response.status);
+                    throw new Error(
+                        "HTTP " + response.status + " from Matrix Worker"
+                    );
                 }
 
                 const data = await response.json();
 
                 if (!Array.isArray(data)) {
-                    throw new Error("The Matrix response was not a JSON array");
+                    throw new Error("Response was not a JSON array");
                 }
 
                 const jobs = data.filter(job => {
@@ -347,8 +348,9 @@
                 statusBox.innerHTML =
                     "<strong>Live Incident Map</strong><br>" +
                     "Agency: " + escapeHtml(agencyName) + "<br>" +
-                    "Unable to refresh jobs.<br>" +
-                    "Check connection or Worker configuration.";
+                    "<strong>Unable to refresh jobs</strong><br>" +
+                    "Error: " +
+                    escapeHtml(error.message || String(error));
             } finally {
                 isLoading = false;
             }
