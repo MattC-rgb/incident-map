@@ -175,6 +175,7 @@
             }
 
             const number = Number(value);
+
             const date = new Date(
                 number < 100000000000 ? number * 1000 : number
             );
@@ -193,7 +194,9 @@
             const id = String(job.id || "").toUpperCase();
 
             if (agency === "av") {
-                return ["J", "E", "Z"].some(prefix => id.startsWith(prefix));
+                return ["J", "E", "Z"].some(prefix =>
+                    id.startsWith(prefix)
+                );
             }
 
             if (agency === "fire") {
@@ -226,34 +229,42 @@
                 <div class="popup-title">
                     ${escapeHtml(job.id || "Unknown incident")}
                 </div>
+
                 <div class="popup-row">
                     <strong>Type:</strong>
                     ${escapeHtml(job.type || job.typecode || "Unknown")}
                 </div>
+
                 <div class="popup-row">
                     <strong>Agency:</strong>
                     ${escapeHtml(job.agency || "Unknown")}
                 </div>
+
                 <div class="popup-row">
                     <strong>Area:</strong>
                     ${escapeHtml(job.area || "Unknown")}
                 </div>
+
                 <div class="popup-row">
                     <strong>Name:</strong>
                     ${escapeHtml(job.name || job.shortname || "Unknown")}
                 </div>
+
                 <div class="popup-row">
                     <strong>Address:</strong>
                     ${escapeHtml(job.address || "Unknown")}
                 </div>
+
                 <div class="popup-row">
                     <strong>Suburb:</strong>
                     ${escapeHtml(job.suburb || "Unknown")}
                 </div>
+
                 <div class="popup-row">
                     <strong>Last seen:</strong>
                     ${escapeHtml(formatTime(job.last_seen))}
                 </div>
+
                 <div class="popup-row">
                     <strong>Source updated:</strong>
                     ${escapeHtml(formatTime(job.source_updated))}
@@ -263,6 +274,7 @@
 
         async function loadJobs() {
             if (isLoading) return;
+
             isLoading = true;
 
             try {
@@ -302,7 +314,7 @@
 
                 incidentLayer.clearLayers();
 
-                // Build map bounds from actual marker coordinates.
+                // Store the coordinates for the initial map zoom.
                 const markerBounds = [];
 
                 jobs.forEach(job => {
@@ -315,7 +327,8 @@
                         {
                             icon: L.divIcon({
                                 className: "",
-                                html: `<div class="incident-marker ${markerClass}"></div>`,
+                                html:
+                                    `<div class="incident-marker ${markerClass}"></div>`,
                                 iconSize: [18, 18],
                                 iconAnchor: [9, 9]
                             })
@@ -328,7 +341,8 @@
                     markerBounds.push([lat, lon]);
                 });
 
-                // Zoom to the jobs on the initial load only.
+                // FIX: fit the map to the actual marker coordinates.
+                // Do not call getBounds() on incidentLayer.
                 if (firstLoad) {
                     if (markerBounds.length === 1) {
                         map.setView(markerBounds[0], 12);
@@ -342,7 +356,8 @@
                     firstLoad = false;
                 }
 
-                const updated = new Date().toLocaleTimeString("en-AU");
+                const updated =
+                    new Date().toLocaleTimeString("en-AU");
 
                 statusBox.innerHTML =
                     "<strong>Live Incident Map</strong><br>" +
@@ -365,6 +380,8 @@
         }
 
         loadJobs();
+
+        // Refresh active jobs every 10 seconds.
         setInterval(loadJobs, 10000);
     })();
     </script>
