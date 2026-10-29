@@ -4,19 +4,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <title>Live Incident Map</title>
 
-    <!-- Ask the browser not to cache this page -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
 
-    <!-- Leaflet map library -->
-    <link
-        rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    >
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
     <style>
         html, body {
@@ -50,9 +44,61 @@
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            background: #d71920;
-            border: 2px solid white;
+            border: 2px solid #333;
             box-shadow: 0 0 4px rgba(0,0,0,0.65);
+            box-sizing: content-box;
+        }
+
+        .marker-av {
+            background: #ffffff;
+            border-color: #555555;
+        }
+
+        .marker-fire {
+            background: #e31b23;
+            border-color: #8b0000;
+        }
+
+        .marker-ses {
+            background: #ff8c00;
+            border-color: #a65300;
+        }
+
+        .map-legend {
+            position: absolute;
+            bottom: 25px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px 12px;
+            border-radius: 6px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.35);
+            font-size: 13px;
+            line-height: 1.8;
+        }
+
+        .legend-dot {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1px solid #555;
+            margin-right: 7px;
+            vertical-align: -2px;
+        }
+
+        .legend-av {
+            background: #ffffff;
+        }
+
+        .legend-fire {
+            background: #e31b23;
+            border-color: #8b0000;
+        }
+
+        .legend-ses {
+            background: #ff8c00;
+            border-color: #a65300;
         }
 
         .popup-title {
@@ -73,17 +119,22 @@
         Connecting to Matrix…
     </div>
 
+    <div class="map-legend">
+        <strong>Agency</strong><br>
+        <span class="legend-dot legend-av"></span>AV<br>
+        <span class="legend-dot legend-fire"></span>Fire<br>
+        <span class="legend-dot legend-ses"></span>SES
+    </div>
+
     <div id="map"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
     (() => {
-        // Matrix feed through your Cloudflare Worker
         const WORKER_URL =
             "https://matrix-live-jobs.matt-cullen.workers.dev/api/jobs";
 
-        // Read the selected agency from the URL
         const params = new URLSearchParams(window.location.search);
         const agency = (params.get("agency") || "").toLowerCase();
 
@@ -94,10 +145,8 @@
         };
 
         const agencyName = agencyNames[agency] || "All agencies";
-
         const statusBox = document.getElementById("status");
 
-        // Initialise the map
         const map = L.map("map").setView([-36.8, 144.5], 7);
 
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -125,8 +174,6 @@
             }
 
             const number = Number(value);
-
-            // Matrix timestamps are Unix seconds
             const date = new Date(
                 number < 100000000000 ? number * 1000 : number
             );
@@ -139,6 +186,38 @@
                 dateStyle: "short",
                 timeStyle: "medium"
             });
+        }
+
+        function matchesAgency(job) {
+            const id = String(job.id || "").toUpperCase();
+
+            if (agency === "av") {
+                return ["J", "E", "Z"].some(prefix => id.startsWith(prefix));
+            }
+
+            if (agency === "fire") {
+                return id.startsWith("F");
+            }
+
+            if (agency === "ses") {
+                return id.startsWith("S");
+            }
+
+            return true;
+        }
+
+        function getMarkerClass(job) {
+            const id = String(job.id || "").toUpperCase();
+
+            if (id.startsWith("F")) {
+                return "marker-fire";
+            }
+
+            if (id.startsWith("S")) {
+                return "marker-ses";
+            }
+
+            return "marker-av";
         }
 
         function makePopup(job) {
@@ -181,30 +260,11 @@
             `;
         }
 
-        function matchesAgency(job) {
-            const id = String(job.id || "").toUpperCase();
-
-            if (agency === "av") {
-                return ["J", "E", "Z"].some(prefix => id.startsWith(prefix));
-            }
-
-            if (agency === "fire") {
-                return id.startsWith("F");
-            }
-
-            if (agency === "ses") {
-                return id.startsWith("S");
-            }
-
-            return true;
-        }
-
         async function loadJobs() {
             if (isLoading) return;
             isLoading = true;
 
             try {
-                // Unique URL and no-store prevent reuse of a cached jobs response
                 const separator = WORKER_URL.includes("?") ? "&" : "?";
                 const requestUrl =
                     WORKER_URL +
@@ -227,7 +287,6 @@
                     throw new Error("The Matrix response was not a JSON array");
                 }
 
-                // Keep active incidents with valid map coordinates
                 const jobs = data.filter(job => {
                     const lat = Number(job.lat);
                     const lon = Number(job.lon);
@@ -243,12 +302,14 @@
                 incidentLayer.clearLayers();
 
                 jobs.forEach(job => {
+                    const markerClass = getMarkerClass(job);
+
                     const marker = L.marker(
                         [Number(job.lat), Number(job.lon)],
                         {
                             icon: L.divIcon({
                                 className: "",
-                                html: '<div class="incident-marker"></div>',
+                                html: `<div class="incident-marker ${markerClass}"></div>`,
                                 iconSize: [18, 18],
                                 iconAnchor: [9, 9]
                             })
@@ -267,17 +328,16 @@
                     "Active jobs: " + jobs.length + "<br>" +
                     "Last refreshed: " + escapeHtml(updated);
 
-                if (firstLoad && jobs.length > 0) {
+                if (firstLoad) {
                     const bounds = incidentLayer.getBounds();
 
                     if (bounds.isValid()) {
-                        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+                        map.fitBounds(bounds, {
+                            padding: [30, 30],
+                            maxZoom: 13
+                        });
                     }
 
-                    firstLoad = false;
-                }
-
-                if (jobs.length === 0) {
                     firstLoad = false;
                 }
 
@@ -294,7 +354,6 @@
             }
         }
 
-        // Initial load, then refresh every 10 seconds
         loadJobs();
         setInterval(loadJobs, 10000);
     })();
