@@ -1,389 +1,189 @@
+<script>
+(() => {
+    const WORKER_URL = "https://matrix-live-jobs.matt-cullen.workers.dev/api/jobs";
+    const STATUS_URL = "https://mattc-rgb.github.io/incident-map/job-status.json";
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Live Incident Map</title>
+    const params = new URLSearchParams(window.location.search);
+    const agency = (params.get("agency") || "").toLowerCase();
+    const agencyNames = { av: "AV", fire: "Fire", ses: "SES" };
+    const agencyName = agencyNames[agency] || "All agencies";
+    const statusBox = document.getElementById("status");
 
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
+    const map = L.map("map").setView([-36.8, 144.5], 7);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    const incidentLayer = L.layerGroup().addTo(map);
+    let firstLoad = true;
+    let isLoading = false;
+    let showCleared = false;
+    let jobStatuses = {};
 
-    <style>
-        html, body {
-            height: 100%;
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-        }
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
 
-        #map {
-            height: 100%;
-            width: 100%;
-        }
+    function formatTime(value) {
+        if (value === null || value === undefined || value === "") return "Unknown";
+        const number = Number(value);
+        const date = new Date(number < 100000000000 ? number * 1000 : number);
+        if (Number.isNaN(date.getTime())) return "Unknown";
+        return date.toLocaleString("en-AU", { dateStyle: "short", timeStyle: "medium" });
+    }
 
-        #status {
-            position: absolute;
-            top: 10px;
-            left: 50px;
-            z-index: 1000;
-            background: white;
-            padding: 10px 14px;
-            border-radius: 6px;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.35);
-            font-size: 14px;
-            line-height: 1.5;
-            max-width: calc(100vw - 100px);
-            overflow-wrap: anywhere;
-        }
+    function matchesAgency(job) {
+        const id = String(job.id || "").toUpperCase();
+        if (agency === "av") return ["J", "E", "Z"].some(prefix => id.startsWith(prefix));
+        if (agency === "fire") return id.startsWith("F");
+        if (agency === "ses") return id.startsWith("S");
+        return true;
+    }
 
-        .incident-marker {
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            border: 2px solid #333;
-            box-shadow: 0 0 4px rgba(0,0,0,0.65);
-            box-sizing: content-box;
-        }
+    function getAgencyClass(job) {
+        const id = String(job.id || "").toUpperCase();
+        if (id.startsWith("F")) return "marker-fire";
+        if (id.startsWith("S")) return "marker-ses";
+        return "marker-av";
+    }
 
-        .marker-av {
-            background: #ffffff;
-            border-color: #555555;
-        }
+    function makePopup(job, status) {
+        return `
+            <div class="popup-title">${escapeHtml(job.id || "Unknown incident")}</div>
+            <div class="popup-row"><strong>Status:</strong> ${escapeHtml(status || "Open")}</div>
+            <div class="popup-row"><strong>Type:</strong> ${escapeHtml(job.type || job.typecode || "Unknown")}</div>
+            <div class="popup-row"><strong>Agency:</strong> ${escapeHtml(job.agency || "Unknown")}</div>
+            <div class="popup-row"><strong>Area:</strong> ${escapeHtml(job.area || "Unknown")}</div>
+            <div class="popup-row"><strong>Name:</strong> ${escapeHtml(job.name || job.shortname || "Unknown")}</div>
+            <div class="popup-row"><strong>Address:</strong> ${escapeHtml(job.address || "Unknown")}</div>
+            <div class="popup-row"><strong>Suburb:</strong> ${escapeHtml(job.suburb || "Unknown")}</div>
+            <div class="popup-row"><strong>Last seen:</strong> ${escapeHtml(formatTime(job.last_seen))}</div>
+            <div class="popup-row"><strong>Source updated:</strong> ${escapeHtml(formatTime(job.source_updated))}</div>
+        `;
+    }
 
-        .marker-fire {
-            background: #e31b23;
-            border-color: #8b0000;
-        }
+    function addShowClearedToggle() {
+        let toggle = document.getElementById("show-cleared-toggle");
+        if (!toggle) {
+            toggle = document.createElement("label");
+            toggle.id = "show-cleared-toggle";
+            toggle.style.display = "block";
+            toggle.style.marginTop = "6px";
+            toggle.innerHTML = '<input type="checkbox" id="show-cleared-checkbox"> Show cleared';
+            statusBox.appendChild(toggle);
 
-        .marker-ses {
-            background: #ff8c00;
-            border-color: #a65300;
-        }
-
-        .map-legend {
-            position: absolute;
-            bottom: 25px;
-            left: 10px;
-            z-index: 1000;
-            background: white;
-            padding: 10px 12px;
-            border-radius: 6px;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.35);
-            font-size: 13px;
-            line-height: 1.8;
-        }
-
-        .legend-dot {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            border: 1px solid #555;
-            margin-right: 7px;
-            vertical-align: -2px;
-        }
-
-        .legend-av {
-            background: #ffffff;
-        }
-
-        .legend-fire {
-            background: #e31b23;
-            border-color: #8b0000;
-        }
-
-        .legend-ses {
-            background: #ff8c00;
-            border-color: #a65300;
-        }
-
-        .popup-title {
-            font-weight: bold;
-            font-size: 16px;
-            margin-bottom: 6px;
-        }
-
-        .popup-row {
-            margin: 3px 0;
-        }
-    </style>
-</head>
-
-<body>
-    <div id="status">
-        <strong>Live Incident Map</strong><br>
-        Connecting to Matrix…
-    </div>
-
-    <div class="map-legend">
-        <strong>Agency</strong><br>
-        <span class="legend-dot legend-av"></span>AV<br>
-        <span class="legend-dot legend-fire"></span>Fire<br>
-        <span class="legend-dot legend-ses"></span>SES
-    </div>
-
-    <div id="map"></div>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-    <script>
-    (() => {
-        const WORKER_URL =
-            "https://matrix-live-jobs.matt-cullen.workers.dev/api/jobs";
-
-        const params = new URLSearchParams(window.location.search);
-        const agency = (params.get("agency") || "").toLowerCase();
-
-        const agencyNames = {
-            av: "AV",
-            fire: "Fire",
-            ses: "SES"
-        };
-
-        const agencyName = agencyNames[agency] || "All agencies";
-        const statusBox = document.getElementById("status");
-
-        const map = L.map("map").setView([-36.8, 144.5], 7);
-
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19,
-            attribution: "&copy; OpenStreetMap contributors"
-        }).addTo(map);
-
-        const incidentLayer = L.layerGroup().addTo(map);
-
-        let firstLoad = true;
-        let isLoading = false;
-
-        function escapeHtml(value) {
-            return String(value ?? "")
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
-        }
-
-        function formatTime(value) {
-            if (value === null || value === undefined || value === "") {
-                return "Unknown";
-            }
-
-            const number = Number(value);
-
-            const date = new Date(
-                number < 100000000000 ? number * 1000 : number
-            );
-
-            if (Number.isNaN(date.getTime())) {
-                return "Unknown";
-            }
-
-            return date.toLocaleString("en-AU", {
-                dateStyle: "short",
-                timeStyle: "medium"
+            document.getElementById("show-cleared-checkbox").addEventListener("change", event => {
+                showCleared = event.target.checked;
+                loadJobs();
             });
+        } else {
+            document.getElementById("show-cleared-checkbox").checked = showCleared;
         }
+    }
 
-        function matchesAgency(job) {
-            const id = String(job.id || "").toUpperCase();
+    async function loadJobs() {
+        if (isLoading) return;
+        isLoading = true;
 
-            if (agency === "av") {
-                return ["J", "E", "Z"].some(prefix =>
-                    id.startsWith(prefix)
-                );
-            }
-
-            if (agency === "fire") {
-                return id.startsWith("F");
-            }
-
-            if (agency === "ses") {
-                return id.startsWith("S");
-            }
-
-            return true;
-        }
-
-        function getMarkerClass(job) {
-            const id = String(job.id || "").toUpperCase();
-
-            if (id.startsWith("F")) {
-                return "marker-fire";
-            }
-
-            if (id.startsWith("S")) {
-                return "marker-ses";
-            }
-
-            return "marker-av";
-        }
-
-        function makePopup(job) {
-            return `
-                <div class="popup-title">
-                    ${escapeHtml(job.id || "Unknown incident")}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Type:</strong>
-                    ${escapeHtml(job.type || job.typecode || "Unknown")}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Agency:</strong>
-                    ${escapeHtml(job.agency || "Unknown")}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Area:</strong>
-                    ${escapeHtml(job.area || "Unknown")}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Name:</strong>
-                    ${escapeHtml(job.name || job.shortname || "Unknown")}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Address:</strong>
-                    ${escapeHtml(job.address || "Unknown")}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Suburb:</strong>
-                    ${escapeHtml(job.suburb || "Unknown")}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Last seen:</strong>
-                    ${escapeHtml(formatTime(job.last_seen))}
-                </div>
-
-                <div class="popup-row">
-                    <strong>Source updated:</strong>
-                    ${escapeHtml(formatTime(job.source_updated))}
-                </div>
-            `;
-        }
-
-        async function loadJobs() {
-            if (isLoading) return;
-
-            isLoading = true;
-
-            try {
-                const requestUrl =
-                    WORKER_URL +
-                    "?agency=" + encodeURIComponent(agency) +
-                    "&_=" + Date.now();
-
-                const response = await fetch(requestUrl, {
-                    method: "GET",
+        try {
+            const [matrixResponse, statusResponse] = await Promise.all([
+                fetch(WORKER_URL + "?agency=" + encodeURIComponent(agency) + "&_=" + Date.now(), {
                     cache: "no-store"
+                }),
+                fetch(STATUS_URL + "?_=" + Date.now(), { cache: "no-store" })
+            ]);
+
+            if (!matrixResponse.ok) throw new Error("Matrix HTTP " + matrixResponse.status);
+            const data = await matrixResponse.json();
+
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                jobStatuses = {};
+                (statusData.jobs || []).forEach(item => {
+                    jobStatuses[String(item.Job).toUpperCase()] = item.Status;
                 });
-
-                if (!response.ok) {
-                    throw new Error(
-                        "HTTP " + response.status + " from Matrix Worker"
-                    );
-                }
-
-                const data = await response.json();
-
-                if (!Array.isArray(data)) {
-                    throw new Error("Response was not a JSON array");
-                }
-
-                const jobs = data.filter(job => {
-                    const lat = Number(job.lat);
-                    const lon = Number(job.lon);
-
-                    return job.is_active === true &&
-                        matchesAgency(job) &&
-                        Number.isFinite(lat) &&
-                        Number.isFinite(lon) &&
-                        Math.abs(lat) <= 90 &&
-                        Math.abs(lon) <= 180;
-                });
-
-                incidentLayer.clearLayers();
-
-                // Store the coordinates for the initial map zoom.
-                const markerBounds = [];
-
-                jobs.forEach(job => {
-                    const lat = Number(job.lat);
-                    const lon = Number(job.lon);
-                    const markerClass = getMarkerClass(job);
-
-                    const marker = L.marker(
-                        [lat, lon],
-                        {
-                            icon: L.divIcon({
-                                className: "",
-                                html:
-                                    `<div class="incident-marker ${markerClass}"></div>`,
-                                iconSize: [18, 18],
-                                iconAnchor: [9, 9]
-                            })
-                        }
-                    );
-
-                    marker.bindPopup(makePopup(job));
-                    marker.addTo(incidentLayer);
-
-                    markerBounds.push([lat, lon]);
-                });
-
-                // FIX: fit the map to the actual marker coordinates.
-                // Do not call getBounds() on incidentLayer.
-                if (firstLoad) {
-                    if (markerBounds.length === 1) {
-                        map.setView(markerBounds[0], 12);
-                    } else if (markerBounds.length > 1) {
-                        map.fitBounds(markerBounds, {
-                            padding: [30, 30],
-                            maxZoom: 13
-                        });
-                    }
-
-                    firstLoad = false;
-                }
-
-                const updated =
-                    new Date().toLocaleTimeString("en-AU");
-
-                statusBox.innerHTML =
-                    "<strong>Live Incident Map</strong><br>" +
-                    "Agency: " + escapeHtml(agencyName) + "<br>" +
-                    "Active jobs: " + jobs.length + "<br>" +
-                    "Last refreshed: " + escapeHtml(updated);
-
-            } catch (error) {
-                console.error("Failed to load Matrix jobs:", error);
-
-                statusBox.innerHTML =
-                    "<strong>Live Incident Map</strong><br>" +
-                    "Agency: " + escapeHtml(agencyName) + "<br>" +
-                    "<strong>Unable to refresh jobs</strong><br>" +
-                    "Error: " +
-                    escapeHtml(error.message || String(error));
-            } finally {
-                isLoading = false;
             }
+
+            if (!Array.isArray(data)) throw new Error("Matrix response was not a JSON array");
+
+            const jobs = data.filter(job => {
+                const lat = Number(job.lat);
+                const lon = Number(job.lon);
+                const status = jobStatuses[String(job.id || "").toUpperCase()] || "Open";
+
+                return job.is_active === true &&
+                    matchesAgency(job) &&
+                    (showCleared || status.toLowerCase() !== "clear") &&
+                    Number.isFinite(lat) &&
+                    Number.isFinite(lon) &&
+                    Math.abs(lat) <= 90 &&
+                    Math.abs(lon) <= 180;
+            });
+
+            incidentLayer.clearLayers();
+            const markerBounds = [];
+
+            jobs.forEach(job => {
+                const id = String(job.id || "").toUpperCase();
+                const status = jobStatuses[id] || "Open";
+                const agencyClass = getAgencyClass(job);
+                const statusClass = status.toLowerCase() === "assigned"
+                    ? "status-assigned"
+                    : status.toLowerCase() === "onscene"
+                        ? "status-onscene"
+                        : "";
+
+                const marker = L.marker([Number(job.lat), Number(job.lon)], {
+                    icon: L.divIcon({
+                        className: "",
+                        html: `<div class="incident-marker ${agencyClass} ${statusClass}"></div>`,
+                        iconSize: [22, 22],
+                        iconAnchor: [11, 11]
+                    })
+                });
+
+                marker.bindPopup(makePopup(job, status));
+                marker.addTo(incidentLayer);
+                markerBounds.push([Number(job.lat), Number(job.lon)]);
+            });
+
+            if (firstLoad) {
+                if (markerBounds.length === 1) {
+                    map.setView(markerBounds[0], 12);
+                } else if (markerBounds.length > 1) {
+                    map.fitBounds(markerBounds, { padding: [30, 30], maxZoom: 13 });
+                }
+                firstLoad = false;
+            }
+
+            const updated = new Date().toLocaleTimeString("en-AU");
+            statusBox.innerHTML =
+                "<strong>Live Incident Map</strong><br>" +
+                "Agency: " + escapeHtml(agencyName) + "<br>" +
+                "Active jobs: " + jobs.length + "<br>" +
+                "Last refreshed: " + escapeHtml(updated);
+            addShowClearedToggle();
+
+        } catch (error) {
+            console.error("Failed to load Matrix jobs:", error);
+            statusBox.innerHTML =
+                "<strong>Live Incident Map</strong><br>" +
+                "Agency: " + escapeHtml(agencyName) + "<br>" +
+                "<strong>Unable to refresh jobs</strong><br>" +
+                "Error: " + escapeHtml(error.message || String(error));
+            addShowClearedToggle();
+        } finally {
+            isLoading = false;
         }
+    }
 
-        loadJobs();
-
-        // Refresh active jobs every 10 seconds.
-        setInterval(loadJobs, 10000);
-    })();
-    </script>
-</body>
-</html>
+    loadJobs();
+    setInterval(loadJobs, 10000);
+})();
+</script>
