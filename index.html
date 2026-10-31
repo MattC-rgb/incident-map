@@ -10,6 +10,7 @@
     <meta http-equiv="Expires" content="0">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
         html, body {
@@ -155,7 +156,7 @@
 <body>
     <div id="status">
         <strong>Live Incident Map</strong><br>
-        Connecting to Matrix…
+        <span id="statusDetails">Connecting to Matrix…</span>
         <div class="status-controls">
             <label>
                 <input id="showCleared" type="checkbox">
@@ -177,10 +178,15 @@
 
     <div id="map"></div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
     <script>
     (() => {
+        if (typeof L === "undefined") {
+            document.getElementById("statusDetails").textContent =
+                "Leaflet failed to load. Check the Leaflet script request in DevTools Network.";
+            console.error("Leaflet did not load; the map cannot start.");
+            return;
+        }
+
         const WORKER_URL =
             "https://matrix-live-jobs.matt-cullen.workers.dev/api/jobs";
 
@@ -197,7 +203,7 @@
         };
 
         const agencyName = agencyNames[agency] || "All agencies";
-        const statusBox = document.getElementById("status");
+        const statusDetails = document.getElementById("statusDetails");
         const showClearedCheckbox = document.getElementById("showCleared");
 
         const map = L.map("map").setView([-36.8, 144.5], 7);
@@ -249,28 +255,21 @@
         function getMarkerClass(job) {
             const id = String(job.id || "").toUpperCase();
 
-            if (id.startsWith("F")) {
-                return "marker-fire";
-            }
-
-            if (id.startsWith("S")) {
-                return "marker-ses";
-            }
-
+            if (id.startsWith("F")) return "marker-fire";
+            if (id.startsWith("S")) return "marker-ses";
             return "marker-av";
         }
 
         function getJobStatus(job) {
-            return String(jobStatuses[String(job.id || "").toUpperCase()] || "Open");
+            return String(
+                jobStatuses[String(job.id || "").trim().toUpperCase()] || "Open"
+            );
         }
 
         function getStatusClass(status) {
             const normalized = String(status || "").toLowerCase();
 
-            if (normalized === "assigned") {
-                return "status-assigned";
-            }
-
+            if (normalized === "assigned") return "status-assigned";
             if (normalized === "onscene" || normalized === "on scene") {
                 return "status-onscene";
             }
@@ -284,32 +283,27 @@
                     ${escapeHtml(job.id || "Unknown incident")}
                 </div>
                 <div class="popup-row">
-                    <strong>Status:</strong>
-                    ${escapeHtml(status)}
+                    <strong>Status:</strong> ${escapeHtml(status)}
                 </div>
                 <div class="popup-row">
                     <strong>Type:</strong>
                     ${escapeHtml(job.type || job.typecode || "Unknown")}
                 </div>
                 <div class="popup-row">
-                    <strong>Agency:</strong>
-                    ${escapeHtml(job.agency || "Unknown")}
+                    <strong>Agency:</strong> ${escapeHtml(job.agency || "Unknown")}
                 </div>
                 <div class="popup-row">
-                    <strong>Area:</strong>
-                    ${escapeHtml(job.area || "Unknown")}
+                    <strong>Area:</strong> ${escapeHtml(job.area || "Unknown")}
                 </div>
                 <div class="popup-row">
                     <strong>Name:</strong>
                     ${escapeHtml(job.name || job.shortname || "Unknown")}
                 </div>
                 <div class="popup-row">
-                    <strong>Address:</strong>
-                    ${escapeHtml(job.address || "Unknown")}
+                    <strong>Address:</strong> ${escapeHtml(job.address || "Unknown")}
                 </div>
                 <div class="popup-row">
-                    <strong>Suburb:</strong>
-                    ${escapeHtml(job.suburb || "Unknown")}
+                    <strong>Suburb:</strong> ${escapeHtml(job.suburb || "Unknown")}
                 </div>
             `;
         }
@@ -340,7 +334,9 @@
                         .toUpperCase();
 
                     if (id) {
-                        newStatuses[id] = String(item.Status || item.status || "Open");
+                        newStatuses[id] = String(
+                            item.Status || item.status || "Open"
+                        );
                     }
                 });
 
@@ -390,8 +386,8 @@
                 });
 
                 const jobs = activeJobs.filter(job => {
-                    const status = getJobStatus(job);
-                    return showCleared || status.toLowerCase() !== "clear";
+                    return showCleared ||
+                        getJobStatus(job).toLowerCase() !== "clear";
                 });
 
                 incidentLayer.clearLayers();
@@ -401,8 +397,8 @@
                 jobs.forEach(job => {
                     const lat = Number(job.lat);
                     const lon = Number(job.lon);
-                    const markerClass = getMarkerClass(job);
                     const status = getJobStatus(job);
+                    const markerClass = getMarkerClass(job);
                     const statusClass = getStatusClass(status);
 
                     const marker = L.marker([lat, lon], {
@@ -434,37 +430,17 @@
 
                 const updated = new Date().toLocaleTimeString("en-AU");
 
-                statusBox.innerHTML =
-                    "<strong>Live Incident Map</strong><br>" +
-                    "Agency: " + escapeHtml(agencyName) + "<br>" +
-                    "Active jobs: " + jobs.length + "<br>" +
-                    "Last refreshed: " + escapeHtml(updated);
-
-                const controls = document.createElement("div");
-                controls.className = "status-controls";
-
-                const label = document.createElement("label");
-                const checkbox = document.createElement("input");
-                checkbox.type = "checkbox";
-                checkbox.checked = showCleared;
-                checkbox.addEventListener("change", () => {
-                    showCleared = checkbox.checked;
-                    loadJobs();
-                });
-
-                label.appendChild(checkbox);
-                label.appendChild(document.createTextNode(" Show cleared jobs"));
-                controls.appendChild(label);
-                statusBox.appendChild(controls);
+                statusDetails.textContent =
+                    "Agency: " + agencyName +
+                    " | Active jobs: " + jobs.length +
+                    " | Refreshed: " + updated;
 
             } catch (error) {
                 console.error("Failed to load Matrix jobs:", error);
-
-                statusBox.innerHTML =
-                    "<strong>Live Incident Map</strong><br>" +
-                    "Agency: " + escapeHtml(agencyName) + "<br>" +
-                    "<strong>Unable to refresh jobs</strong><br>" +
-                    "Error: " + escapeHtml(error.message || String(error));
+                statusDetails.textContent =
+                    "Agency: " + agencyName +
+                    " | Unable to refresh jobs: " +
+                    (error.message || String(error));
             } finally {
                 isLoading = false;
             }
