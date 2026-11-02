@@ -195,6 +195,7 @@
 
         const params = new URLSearchParams(window.location.search);
         const agency = (params.get("agency") || "").toLowerCase();
+        const area = (params.get("area") || "ALL").trim().toUpperCase();
 
         const agencyNames = {
             av: "AV",
@@ -235,7 +236,9 @@
         }
 
         function matchesAgency(job) {
-            const id = String(job.id || "").toUpperCase();
+            const id = String(job.id || "").trim().toUpperCase();
+            const jobArea = String(job.area || "").trim().toUpperCase();
+            const matchesArea = area === "ALL" || jobArea === area;
 
             if (agency === "av") {
                 return ["J", "E", "Z"].some(prefix => id.startsWith(prefix));
@@ -246,7 +249,15 @@
             }
 
             if (agency === "ses") {
-                return id.startsWith("S");
+                if (id.startsWith("S")) {
+                    return matchesArea;
+                }
+
+                if (id.startsWith("F")) {
+                    return area !== "ALL" && matchesArea;
+                }
+
+                return false;
             }
 
             return true;
@@ -353,9 +364,11 @@
             try {
                 await loadJobStatuses();
 
+                const workerAgency = agency === "ses" ? "all" : agency;
+
                 const requestUrl =
                     WORKER_URL +
-                    "?agency=" + encodeURIComponent(agency) +
+                    "?agency=" + encodeURIComponent(workerAgency) +
                     "&_=" + Date.now();
 
                 const response = await fetch(requestUrl, {
@@ -432,6 +445,7 @@
 
                 statusDetails.textContent =
                     "Agency: " + agencyName +
+                    (agency === "ses" && area !== "ALL" ? " | Area: " + area : "") +
                     " | Active jobs: " + jobs.length +
                     " | Refreshed: " + updated;
 
