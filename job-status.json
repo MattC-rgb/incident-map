@@ -70,7 +70,7 @@
     },
     {
       "Job": "S261150098",
-      "Status": "Open"
+      "Status": "Assigned"
     },
     {
       "Job": "S261150097",
@@ -86,7 +86,7 @@
     },
     {
       "Job": "S261150104",
-      "Status": "Assigned"
+      "Status": "Open"
     }
   ]
 }
